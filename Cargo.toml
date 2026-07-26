@@ -10,3 +10,20 @@ lto = true
 
 [profile.dev]
 panic = "abort"
+
+[patch."https://github.com/lightningdevkit/ldk-node"]
+ldk-node = { path = "../ldk-node" }
+
+[patch."https://github.com/lightningdevkit/rust-lightning"]
+lightning = { git = "https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning", branch = "fix-offer-compact-intro-node-ldkdep" }
+lightning-types = { git = "https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning", branch = "fix-offer-compact-intro-node-ldkdep" }
+lightning-invoice = { git = "https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning", branch = "fix-offer-compact-intro-node-ldkdep" }
+lightning-net-tokio = { git = "https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning", branch = "fix-offer-compact-intro-node-ldkdep" }
+lightning-persister = { git = "https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning", branch = "fix-offer-compact-intro-node-ldkdep" }
+lightning-background-processor = { git = "https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning", branch = "fix-offer-compact-intro-node-ldkdep" }
+lightning-rapid-gossip-sync = { git = "https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning", branch = "fix-offer-compact-intro-node-ldkdep" }
+lightning-block-sync = { git = "https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning", branch = "fix-offer-compact-intro-node-ldkdep" }
+lightning-transaction-sync = { git = "https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning", branch = "fix-offer-compact-intro-node-ldkdep" }
+lightning-liquidity = { git = "https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning", branch = "fix-offer-compact-intro-node-ldkdep" }
+lightning-macros = { git = "https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning", branch = "fix-offer-compact-intro-node-ldkdep" }
+lightning-dns-resolver = { git = "https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning", branch = "fix-offer-compact-intro-node-ldkdep" }
