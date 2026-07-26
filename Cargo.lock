@@ -272,7 +272,7 @@ checksum = "0b47c4ab7a93edb0c7198c5535ed9b52b63095f4e9b45279c6736cec4b856baf"
 [[package]]
 name = "bitcoin-payment-instructions"
 version = "0.6.0"
-source = "git+https://github.com/jkczyz/bitcoin-payment-instructions?rev=a7b32d5fded9bb45f73bf82e6d7187adf705171c#a7b32d5fded9bb45f73bf82e6d7187adf705171c"
+source = "git+https://github.com/jkczyz/bitcoin-payment-instructions?rev=679dac50cc0d81ec4d31da94b93d467e5308f16a#679dac50cc0d81ec4d31da94b93d467e5308f16a"
 dependencies = [
  "bitcoin",
  "dnssec-prover",
@@ -530,7 +530,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1001,7 +1001,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.1",
  "tokio",
  "tower-service",
  "tracing",
@@ -1203,7 +1203,6 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 [[package]]
 name = "ldk-node"
 version = "0.8.0+git"
-source = "git+https://github.com/lightningdevkit/ldk-node?rev=21eea8c881790db7a90bcad4f7f45f341c72222b#21eea8c881790db7a90bcad4f7f45f341c72222b"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1343,7 +1342,7 @@ dependencies = [
 [[package]]
 name = "lightning"
 version = "0.3.0+git"
-source = "git+https://github.com/lightningdevkit/rust-lightning?rev=38a62c32454d3eac22578144c479dbf9a6d9bff6#38a62c32454d3eac22578144c479dbf9a6d9bff6"
+source = "git+https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning?branch=fix-offer-compact-intro-node-ldkdep#9352bda8993276fe907f7a60fa5fd0aeaf1e2ade"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -1359,7 +1358,7 @@ dependencies = [
 [[package]]
 name = "lightning-background-processor"
 version = "0.3.0+git"
-source = "git+https://github.com/lightningdevkit/rust-lightning?rev=38a62c32454d3eac22578144c479dbf9a6d9bff6#38a62c32454d3eac22578144c479dbf9a6d9bff6"
+source = "git+https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning?branch=fix-offer-compact-intro-node-ldkdep#9352bda8993276fe907f7a60fa5fd0aeaf1e2ade"
 dependencies = [
  "bitcoin",
  "bitcoin-io",
@@ -1373,7 +1372,7 @@ dependencies = [
 [[package]]
 name = "lightning-block-sync"
 version = "0.3.0+git"
-source = "git+https://github.com/lightningdevkit/rust-lightning?rev=38a62c32454d3eac22578144c479dbf9a6d9bff6#38a62c32454d3eac22578144c479dbf9a6d9bff6"
+source = "git+https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning?branch=fix-offer-compact-intro-node-ldkdep#9352bda8993276fe907f7a60fa5fd0aeaf1e2ade"
 dependencies = [
  "bitcoin",
  "bitreq",
@@ -1385,7 +1384,7 @@ dependencies = [
 [[package]]
 name = "lightning-dns-resolver"
 version = "0.3.0+git"
-source = "git+https://github.com/lightningdevkit/rust-lightning?rev=38a62c32454d3eac22578144c479dbf9a6d9bff6#38a62c32454d3eac22578144c479dbf9a6d9bff6"
+source = "git+https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning?branch=fix-offer-compact-intro-node-ldkdep#9352bda8993276fe907f7a60fa5fd0aeaf1e2ade"
 dependencies = [
  "dnssec-prover",
  "lightning",
@@ -1396,7 +1395,7 @@ dependencies = [
 [[package]]
 name = "lightning-invoice"
 version = "0.35.0+git"
-source = "git+https://github.com/lightningdevkit/rust-lightning?rev=38a62c32454d3eac22578144c479dbf9a6d9bff6#38a62c32454d3eac22578144c479dbf9a6d9bff6"
+source = "git+https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning?branch=fix-offer-compact-intro-node-ldkdep#9352bda8993276fe907f7a60fa5fd0aeaf1e2ade"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -1407,7 +1406,7 @@ dependencies = [
 [[package]]
 name = "lightning-liquidity"
 version = "0.3.0+git"
-source = "git+https://github.com/lightningdevkit/rust-lightning?rev=38a62c32454d3eac22578144c479dbf9a6d9bff6#38a62c32454d3eac22578144c479dbf9a6d9bff6"
+source = "git+https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning?branch=fix-offer-compact-intro-node-ldkdep#9352bda8993276fe907f7a60fa5fd0aeaf1e2ade"
 dependencies = [
  "bitcoin",
  "chrono",
@@ -1422,7 +1421,7 @@ dependencies = [
 [[package]]
 name = "lightning-macros"
 version = "0.2.2+git"
-source = "git+https://github.com/lightningdevkit/rust-lightning?rev=38a62c32454d3eac22578144c479dbf9a6d9bff6#38a62c32454d3eac22578144c479dbf9a6d9bff6"
+source = "git+https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning?branch=fix-offer-compact-intro-node-ldkdep#9352bda8993276fe907f7a60fa5fd0aeaf1e2ade"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1432,7 +1431,7 @@ dependencies = [
 [[package]]
 name = "lightning-net-tokio"
 version = "0.3.0+git"
-source = "git+https://github.com/lightningdevkit/rust-lightning?rev=38a62c32454d3eac22578144c479dbf9a6d9bff6#38a62c32454d3eac22578144c479dbf9a6d9bff6"
+source = "git+https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning?branch=fix-offer-compact-intro-node-ldkdep#9352bda8993276fe907f7a60fa5fd0aeaf1e2ade"
 dependencies = [
  "bitcoin",
  "lightning",
@@ -1442,7 +1441,7 @@ dependencies = [
 [[package]]
 name = "lightning-persister"
 version = "0.3.0+git"
-source = "git+https://github.com/lightningdevkit/rust-lightning?rev=38a62c32454d3eac22578144c479dbf9a6d9bff6#38a62c32454d3eac22578144c479dbf9a6d9bff6"
+source = "git+https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning?branch=fix-offer-compact-intro-node-ldkdep#9352bda8993276fe907f7a60fa5fd0aeaf1e2ade"
 dependencies = [
  "bitcoin",
  "lightning",
@@ -1453,7 +1452,7 @@ dependencies = [
 [[package]]
 name = "lightning-rapid-gossip-sync"
 version = "0.3.0+git"
-source = "git+https://github.com/lightningdevkit/rust-lightning?rev=38a62c32454d3eac22578144c479dbf9a6d9bff6#38a62c32454d3eac22578144c479dbf9a6d9bff6"
+source = "git+https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning?branch=fix-offer-compact-intro-node-ldkdep#9352bda8993276fe907f7a60fa5fd0aeaf1e2ade"
 dependencies = [
  "bitcoin",
  "bitcoin-io",
@@ -1464,7 +1463,7 @@ dependencies = [
 [[package]]
 name = "lightning-transaction-sync"
 version = "0.3.0+git"
-source = "git+https://github.com/lightningdevkit/rust-lightning?rev=38a62c32454d3eac22578144c479dbf9a6d9bff6#38a62c32454d3eac22578144c479dbf9a6d9bff6"
+source = "git+https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning?branch=fix-offer-compact-intro-node-ldkdep#9352bda8993276fe907f7a60fa5fd0aeaf1e2ade"
 dependencies = [
  "bitcoin",
  "electrum-client",
@@ -1477,7 +1476,7 @@ dependencies = [
 [[package]]
 name = "lightning-types"
 version = "0.4.0+git"
-source = "git+https://github.com/lightningdevkit/rust-lightning?rev=38a62c32454d3eac22578144c479dbf9a6d9bff6#38a62c32454d3eac22578144c479dbf9a6d9bff6"
+source = "git+https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning?branch=fix-offer-compact-intro-node-ldkdep#9352bda8993276fe907f7a60fa5fd0aeaf1e2ade"
 dependencies = [
  "bitcoin",
 ]
@@ -1636,7 +1635,7 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 [[package]]
 name = "possiblyrandom"
 version = "0.2.0"
-source = "git+https://github.com/lightningdevkit/rust-lightning?rev=38a62c32454d3eac22578144c479dbf9a6d9bff6#38a62c32454d3eac22578144c479dbf9a6d9bff6"
+source = "git+https://git.rust-bitcoin.org/vincenzopalazzo/rust-lightning?branch=fix-offer-compact-intro-node-ldkdep#9352bda8993276fe907f7a60fa5fd0aeaf1e2ade"
 dependencies = [
  "getrandom 0.2.16",
 ]
@@ -1745,7 +1744,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.34",
- "socket2 0.5.10",
+ "socket2 0.6.1",
  "thiserror",
  "tokio",
  "tracing",
@@ -1782,9 +1781,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.1",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2026,7 +2025,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2124,7 +2123,7 @@ version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9465315bc9d4566e1724f0fffcbcc446268cb522e60f9a27bcded6b19c108113"
 dependencies = [
- "bitcoin_hashes 0.14.0",
+ "bitcoin_hashes 0.13.0",
  "rand 0.8.5",
  "secp256k1-sys",
  "serde",
@@ -2347,7 +2346,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
