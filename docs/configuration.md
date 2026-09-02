@@ -91,6 +91,26 @@ You must configure **exactly one** of the following sections:
 - **`[esplora]`** - Esplora HTTP API. Convenient for quick testing with a public block
   explorer (e.g., mempool.space), but not recommended for production use.
 
+### `[esplora.sync]` and `[electrum.sync]`
+
+Fine-tuning for Esplora/Electrum chain sources, useful when the public endpoint (e.g. `mempool.space`) rate-limits.
+All fields are optional and fall back to `ldk-node` defaults:
+
+- **`[esplora.sync.background_sync]` / `[electrum.sync.background_sync]`** — `onchain_wallet_sync_interval_secs` (default 60), `lightning_wallet_sync_interval_secs` (default 60), `fee_rate_cache_update_interval_secs` (default 600). Minimum `10` when set; raise to spread load and avoid 429s.
+- **`[esplora.sync.timeouts]` / `[electrum.sync.timeouts]`** — `onchain_wallet_sync_timeout_secs` (60), `lightning_wallet_sync_timeout_secs` (30), `fee_rate_cache_update_timeout_secs` (10), `tx_broadcast_timeout_secs` (10), `per_request_timeout_secs` (10, `u8`). Raising `per_request_timeout_secs` to `20-30` helps against transient `TxSyncFailed` / `Incremental sync of on-chain wallet failed` on public Esplora.
+
+Example (`contrib/ldk-server-config.toml`):
+
+```toml
+[esplora]
+server_url = "https://mempool.space/api"
+[esplora.sync.timeouts]
+per_request_timeout_secs = 20
+onchain_wallet_sync_timeout_secs = 90
+```
+
+> **Tip:** For production, prefer `bitcoind` RPC (most reliable) or a self-hosted `electrs` + Esplora instance. Public `mempool.space` is best-effort and will 429 under load. See `docs/operations.md`.
+
 > **Warning:** When using Electrum or Esplora, LDK cannot verify Lightning gossip messages
 > against the blockchain. This means a malicious peer could flood your node with fake channel
 > announcements, consuming memory and disk. If your node is publicly reachable, use bitcoind.

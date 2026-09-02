@@ -122,6 +122,31 @@ The gRPC service binds to `127.0.0.1:3536` by default. For remote access, either
 2. Use a reverse proxy (e.g., nginx, Caddy) that terminates TLS and forwards to the loopback
    address
 
+## Chain Backend Reliability (Esplora / Electrum)
+
+Public Esplora endpoints such as `https://mempool.space/api` rate-limit (`429`) under load and surface as `Incremental sync of on-chain wallet failed` / `TxSyncFailed` / `Lightning-wallet sync failure`. For vincent@65 this was 8 events in a day (last at 08:16 UTC) — all recovered on next interval.
+
+Mitigations (in order of reliability):
+
+1. **Preferred: `bitcoind` RPC** — most reliable and private; required for production. See `[bitcoind]` in `contrib/ldk-server-config.toml`.
+2. **Self-hosted `electrs` + Esplora** — run your own `electrs`/`esplora` and point `[esplora] server_url` or `[electrum] server_url` at it.
+3. **If you must use public `mempool.space`**, tune sync as in `docs/configuration.md#esplorasync-and-electrumsync`:
+
+```toml
+[esplora]
+server_url = "https://mempool.space/api"
+[esplora.sync.timeouts]
+per_request_timeout_secs = 20
+onchain_wallet_sync_timeout_secs = 90
+[esplora.sync.background_sync]
+onchain_wallet_sync_interval_secs = 60
+lightning_wallet_sync_interval_secs = 60
+```
+
+Raise `per_request_timeout_secs` before adding aggressive retries; spreading intervals with jitter reduces 429s. **B** (this PR) exposes these knobs without code change. **A** (follow-up upstream `ldk-node` PR) will add async exponential backoff with jitter and `Retry-After` handling, modelled on `folgore-plugin/src/recovery.rs:24` `TimeoutRetry` but via `tokio::time::sleep`.
+
+Alerting tip: alert on rate (`>5 sync failures/hour`) rather than per-event; the node self-recovers on next interval.
+
 ## Monitoring
 
 ### Prometheus Metrics

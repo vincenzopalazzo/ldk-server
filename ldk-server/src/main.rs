@@ -159,11 +159,11 @@ fn main() {
 		ChainSource::Rpc { rpc_host, rpc_port, rpc_user, rpc_password } => {
 			builder.set_chain_source_bitcoind_rpc(rpc_host, rpc_port, rpc_user, rpc_password);
 		},
-		ChainSource::Electrum { server_url } => {
-			builder.set_chain_source_electrum(server_url, None);
+		ChainSource::Electrum { server_url, sync_config } => {
+			builder.set_chain_source_electrum(server_url, sync_config);
 		},
-		ChainSource::Esplora { server_url } => {
-			builder.set_chain_source_esplora(server_url, None);
+		ChainSource::Esplora { server_url, sync_config } => {
+			builder.set_chain_source_esplora(server_url, sync_config);
 		},
 	}
 

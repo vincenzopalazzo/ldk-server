@@ -15,7 +15,10 @@ use std::{fs, io};
 use clap::Parser;
 use ldk_node::bitcoin::secp256k1::PublicKey;
 use ldk_node::bitcoin::Network;
-use ldk_node::config::{AsyncPaymentsRole, HRNResolverConfig, HumanReadableNamesConfig};
+use ldk_node::config::{
+	AsyncPaymentsRole, BackgroundSyncConfig, ElectrumSyncConfig, EsploraSyncConfig,
+	HRNResolverConfig, HumanReadableNamesConfig, SyncTimeoutsConfig,
+};
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeAlias;
 use ldk_node::liquidity::LSPS2ServiceConfig;
@@ -84,8 +87,8 @@ pub struct TlsConfig {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ChainSource {
 	Rpc { rpc_host: String, rpc_port: u16, rpc_user: String, rpc_password: String },
-	Electrum { server_url: String },
-	Esplora { server_url: String },
+	Electrum { server_url: String, sync_config: Option<ElectrumSyncConfig> },
+	Esplora { server_url: String, sync_config: Option<EsploraSyncConfig> },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -111,7 +114,9 @@ struct ConfigBuilder {
 	grpc_service_address: Option<String>,
 	storage_dir_path: Option<String>,
 	electrum_url: Option<String>,
+	electrum_sync_config: Option<ElectrumSyncTomlConfig>,
 	esplora_url: Option<String>,
+	esplora_sync_config: Option<EsploraSyncTomlConfig>,
 	bitcoind_rpc_address: Option<String>,
 	bitcoind_rpc_user: Option<String>,
 	bitcoind_rpc_password: Option<String>,
@@ -162,10 +167,12 @@ impl ConfigBuilder {
 
 		if let Some(electrum) = toml.electrum {
 			self.electrum_url = Some(electrum.server_url);
+			self.electrum_sync_config = electrum.sync;
 		}
 
 		if let Some(esplora) = toml.esplora {
 			self.esplora_url = Some(esplora.server_url);
+			self.esplora_sync_config = esplora.sync;
 		}
 
 		if let Some(log) = toml.log {
@@ -359,9 +366,11 @@ impl ConfigBuilder {
 
 			ChainSource::Rpc { rpc_host, rpc_port, rpc_user, rpc_password }
 		} else if let Some(url) = self.electrum_url {
-			ChainSource::Electrum { server_url: url }
+			let sync_config = self.electrum_sync_config.map(|c| c.try_into()).transpose()?;
+			ChainSource::Electrum { server_url: url, sync_config }
 		} else if let Some(url) = self.esplora_url {
-			ChainSource::Esplora { server_url: url }
+			let sync_config = self.esplora_sync_config.map(|c| c.try_into()).transpose()?;
+			ChainSource::Esplora { server_url: url, sync_config }
 		} else {
 			return Err(io::Error::new(io::ErrorKind::InvalidInput, "No valid Chain Source configured. Provide Bitcoind RPC, Electrum, or Esplora details."));
 		};
@@ -531,12 +540,134 @@ struct BitcoindConfig {
 #[serde(deny_unknown_fields)]
 struct ElectrumConfig {
 	server_url: String,
+	sync: Option<ElectrumSyncTomlConfig>,
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct EsploraConfig {
 	server_url: String,
+	sync: Option<EsploraSyncTomlConfig>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ElectrumSyncTomlConfig {
+	background_sync: Option<BackgroundSyncTomlConfig>,
+	timeouts: Option<SyncTimeoutsTomlConfig>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct EsploraSyncTomlConfig {
+	background_sync: Option<BackgroundSyncTomlConfig>,
+	timeouts: Option<SyncTimeoutsTomlConfig>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BackgroundSyncTomlConfig {
+	onchain_wallet_sync_interval_secs: Option<u64>,
+	lightning_wallet_sync_interval_secs: Option<u64>,
+	fee_rate_cache_update_interval_secs: Option<u64>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SyncTimeoutsTomlConfig {
+	onchain_wallet_sync_timeout_secs: Option<u64>,
+	lightning_wallet_sync_timeout_secs: Option<u64>,
+	fee_rate_cache_update_timeout_secs: Option<u64>,
+	tx_broadcast_timeout_secs: Option<u64>,
+	per_request_timeout_secs: Option<u8>,
+}
+
+impl TryFrom<EsploraSyncTomlConfig> for EsploraSyncConfig {
+	type Error = io::Error;
+	fn try_from(value: EsploraSyncTomlConfig) -> Result<Self, Self::Error> {
+		let background_sync_config = match value.background_sync {
+			None => Some(BackgroundSyncConfig::default()),
+			Some(bg) => Some(bg.try_into()?),
+		};
+		let timeouts_config = match value.timeouts {
+			None => SyncTimeoutsConfig::default(),
+			Some(t) => t.try_into()?,
+		};
+		Ok(Self { background_sync_config, timeouts_config })
+	}
+}
+
+impl TryFrom<ElectrumSyncTomlConfig> for ElectrumSyncConfig {
+	type Error = io::Error;
+	fn try_from(value: ElectrumSyncTomlConfig) -> Result<Self, Self::Error> {
+		let background_sync_config = match value.background_sync {
+			None => Some(BackgroundSyncConfig::default()),
+			Some(bg) => Some(bg.try_into()?),
+		};
+		let timeouts_config = match value.timeouts {
+			None => SyncTimeoutsConfig::default(),
+			Some(t) => t.try_into()?,
+		};
+		Ok(Self { background_sync_config, timeouts_config })
+	}
+}
+
+impl TryFrom<BackgroundSyncTomlConfig> for BackgroundSyncConfig {
+	type Error = io::Error;
+	fn try_from(value: BackgroundSyncTomlConfig) -> Result<Self, Self::Error> {
+		let mut cfg = BackgroundSyncConfig::default();
+		if let Some(v) = value.onchain_wallet_sync_interval_secs {
+			if v != 0 && v < 10 {
+				return Err(io::Error::new(
+					io::ErrorKind::InvalidInput,
+					"onchain_wallet_sync_interval_secs must be >= 10".to_string(),
+				));
+			}
+			cfg.onchain_wallet_sync_interval_secs = v;
+		}
+		if let Some(v) = value.lightning_wallet_sync_interval_secs {
+			if v != 0 && v < 10 {
+				return Err(io::Error::new(
+					io::ErrorKind::InvalidInput,
+					"lightning_wallet_sync_interval_secs must be >= 10".to_string(),
+				));
+			}
+			cfg.lightning_wallet_sync_interval_secs = v;
+		}
+		if let Some(v) = value.fee_rate_cache_update_interval_secs {
+			if v != 0 && v < 10 {
+				return Err(io::Error::new(
+					io::ErrorKind::InvalidInput,
+					"fee_rate_cache_update_interval_secs must be >= 10".to_string(),
+				));
+			}
+			cfg.fee_rate_cache_update_interval_secs = v;
+		}
+		Ok(cfg)
+	}
+}
+
+impl TryFrom<SyncTimeoutsTomlConfig> for SyncTimeoutsConfig {
+	type Error = io::Error;
+	fn try_from(value: SyncTimeoutsTomlConfig) -> Result<Self, Self::Error> {
+		let mut cfg = SyncTimeoutsConfig::default();
+		if let Some(v) = value.onchain_wallet_sync_timeout_secs {
+			cfg.onchain_wallet_sync_timeout_secs = v;
+		}
+		if let Some(v) = value.lightning_wallet_sync_timeout_secs {
+			cfg.lightning_wallet_sync_timeout_secs = v;
+		}
+		if let Some(v) = value.fee_rate_cache_update_timeout_secs {
+			cfg.fee_rate_cache_update_timeout_secs = v;
+		}
+		if let Some(v) = value.tx_broadcast_timeout_secs {
+			cfg.tx_broadcast_timeout_secs = v;
+		}
+		if let Some(v) = value.per_request_timeout_secs {
+			cfg.per_request_timeout_secs = v;
+		}
+		Ok(cfg)
+	}
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1194,7 +1325,7 @@ mod tests {
 		fs::write(storage_path.join(config_file_name), toml_config).unwrap();
 		let config = load_config(&args_config).unwrap();
 
-		let ChainSource::Electrum { server_url } = config.chain_source else {
+		let ChainSource::Electrum { server_url, .. } = config.chain_source else {
 			panic!("unexpected chain source");
 		};
 
