@@ -53,6 +53,7 @@ the following config to `/etc/logrotate.d/ldk-server` (adjust the log path to ma
 | File                                   | Priority     | Description                                                                |
 | -------------------------------------- | ------------ | -------------------------------------------------------------------------- |
 | `<storage_dir>/keys_mnemonic`          | **Critical** | BIP39 mnemonic. Required to recover on-chain funds. Default for new installs. |
+| `<storage_dir>/keys_seed`              | **Critical** | Legacy 64-byte seed. Required to recover on-chain funds when `keys_mnemonic` is absent. |
 | `<network_dir>/ldk_node_data.sqlite` or configured PostgreSQL database   | **Critical** | Channel state, on-chain wallet data, payment and forwarding history. Required to recover channel funds. |
 
 ### What is Reconstructable
@@ -201,4 +202,5 @@ by network; configure a distinct database or table for each network.
 
 The `keys_mnemonic` file is shared across networks (stored at the storage root, not per-network).
 Keys are split by network at the derivation path level, so the same mnemonic will produce
-different keys.
+different keys. A legacy `keys_seed` at the same storage root is also shared. Startup loads
+that seed only when `keys_mnemonic` is absent, and refuses to start if both files exist.
