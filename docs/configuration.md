@@ -248,6 +248,7 @@ Two resolution methods are supported via the `mode` field:
 ```
 <storage_dir>/
   keys_mnemonic          # BIP39 mnemonic (default for new installs)
+  keys_seed              # Legacy 64-byte seed, loaded only when keys_mnemonic is absent
   tls.crt                # TLS certificate (PEM)
   tls.key                # TLS private key (PEM)
   <network>/                # e.g., bitcoin/, regtest/, signet/
@@ -258,10 +259,11 @@ Two resolution methods are supported via the `mode` field:
 ```
 
 The mnemonic is the node's master secret, required to recover on-chain funds. On first start,
-ldk-server generates a fresh 24-word BIP39 mnemonic at `<storage_dir>/keys_mnemonic` if the file
-does not already exist. `ldk_node_data.sqlite` holds channel state and payment history. Both files
-are required to recover channel funds. See [Operations - Backups](operations.md#backups) for backup
-guidance.
+ldk-server generates a fresh 24-word BIP39 mnemonic at `<storage_dir>/keys_mnemonic` if neither
+that file nor a legacy `keys_seed` already exists. An existing 64-byte `keys_seed` is loaded as `NodeEntropy` and no mnemonic is created. If both files exist, startup
+fails instead of guessing which secret owns the channel state. `ldk_node_data.sqlite` holds
+channel state and payment history. Both the secret and the channel database are required to
+recover channel funds. See [Operations - Backups](operations.md#backups) for backup guidance.
 
 When `[storage.postgres]` is configured, LDK Node wallet state, channel state, payment
 history, and forwarding history are stored in PostgreSQL instead of `ldk_node_data.sqlite`.
