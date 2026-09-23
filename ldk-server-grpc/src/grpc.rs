@@ -10,7 +10,11 @@
 //! gRPC wire protocol primitives implemented directly on HTTP/2,
 //! without depending on tonic or any gRPC framework.
 //!
+//! Also speaks gRPC-Web (binary mode) for browsers, which cannot read HTTP trailers: the
+//! trailers travel as a final length-prefixed frame in the body instead.
+//!
 //! Reference: <https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md>
+//! and <https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md>
 
 use bytes::{BufMut, Bytes, BytesMut};
 
@@ -106,6 +110,8 @@ pub enum GrpcBody {
 	Stream { rx: tokio::sync::mpsc::Receiver<Result<Bytes, GrpcStatus>>, done: bool },
 	/// Plain (non-gRPC) response body with no trailers, used for non-RPC endpoints like metrics.
 	Plain { data: Option<Bytes> },
+	/// A gRPC body re-framed for gRPC-Web: its trailers are sent as a final body frame.
+	Web(Box<GrpcBody>),
 }
 
 impl http_body::Body for GrpcBody {
@@ -154,8 +160,85 @@ impl http_body::Body for GrpcBody {
 				Some(bytes) => Poll::Ready(Some(Ok(http_body::Frame::data(bytes)))),
 				None => Poll::Ready(None),
 			},
+			GrpcBody::Web(inner) => match std::pin::Pin::new(inner.as_mut()).poll_frame(_cx) {
+				Poll::Ready(Some(Ok(frame))) => match frame.into_trailers() {
+					Ok(trailers) => Poll::Ready(Some(Ok(http_body::Frame::data(
+						encode_grpc_web_trailers(&trailers),
+					)))),
+					Err(frame) => Poll::Ready(Some(Ok(frame))),
+				},
+				other => other,
+			},
 		}
 	}
+}
+
+/// Flag byte marking a gRPC-Web frame that carries trailers rather than a message.
+const GRPC_WEB_TRAILERS_FLAG: u8 = 0x80;
+
+/// Encode trailers as a gRPC-Web trailer frame: flag `0x80`, 4-byte big-endian length, then
+/// the trailers as HTTP/1-style `name: value\r\n` lines.
+pub fn encode_grpc_web_trailers(trailers: &http::HeaderMap) -> Bytes {
+	let mut block = BytesMut::new();
+	for (name, value) in trailers {
+		block.put_slice(name.as_str().as_bytes());
+		block.put_slice(b": ");
+		block.put_slice(value.as_bytes());
+		block.put_slice(b"\r\n");
+	}
+	let mut frame = BytesMut::with_capacity(5 + block.len());
+	frame.put_u8(GRPC_WEB_TRAILERS_FLAG);
+	frame.put_u32(block.len() as u32);
+	frame.put_slice(&block);
+	frame.freeze()
+}
+
+/// The content-type a gRPC-Web response is sent with.
+pub const GRPC_WEB_CONTENT_TYPE: &str = "application/grpc-web+proto";
+
+/// How a request asks to be spoken to.
+#[derive(Debug, PartialEq, Eq)]
+pub enum GrpcProtocol {
+	/// Native gRPC over HTTP/2.
+	Grpc,
+	/// gRPC-Web, binary mode (`application/grpc-web` or `application/grpc-web+proto`).
+	Web,
+	/// gRPC-Web text mode (base64), which is not supported.
+	WebText,
+}
+
+/// Tell native gRPC and gRPC-Web requests apart by their content-type.
+pub fn grpc_protocol<B>(req: &http::Request<B>) -> GrpcProtocol {
+	let content_type =
+		req.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("");
+	match content_type {
+		"application/grpc-web" | "application/grpc-web+proto" => GrpcProtocol::Web,
+		ct if ct.starts_with("application/grpc-web-text") => GrpcProtocol::WebText,
+		_ => GrpcProtocol::Grpc,
+	}
+}
+
+/// Turn a gRPC response into its gRPC-Web equivalent: same status and messages, gRPC-Web
+/// content-type, and trailers carried in the body. Trailers-Only error responses keep their
+/// status in the headers, which gRPC-Web also allows.
+pub fn into_grpc_web_response(response: http::Response<GrpcBody>) -> http::Response<GrpcBody> {
+	let (mut parts, body) = response.into_parts();
+	let body = match body {
+		GrpcBody::Empty => GrpcBody::Empty,
+		GrpcBody::Plain { data } => GrpcBody::Plain { data },
+		other => {
+			// The trailer frame adds bytes, so a content-length computed for gRPC is wrong.
+			parts.headers.remove(http::header::CONTENT_LENGTH);
+			GrpcBody::Web(Box::new(other))
+		},
+	};
+	if parts.headers.contains_key(http::header::CONTENT_TYPE) {
+		parts.headers.insert(
+			http::header::CONTENT_TYPE,
+			http::HeaderValue::from_static(GRPC_WEB_CONTENT_TYPE),
+		);
+	}
+	http::Response::from_parts(parts, body)
 }
 
 /// Build trailers for a successful gRPC response.
@@ -308,6 +391,68 @@ pub fn parse_grpc_timeout(value: &str) -> Result<std::time::Duration, GrpcStatus
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use http_body_util::BodyExt;
+
+	fn collect(body: GrpcBody) -> Bytes {
+		let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+		rt.block_on(async { body.collect().await.unwrap().to_bytes() })
+	}
+
+	#[test]
+	fn test_grpc_web_unary_carries_trailers_in_body() {
+		let message = encode_grpc_frame(b"hello");
+		let response = into_grpc_web_response(grpc_response(GrpcBody::Unary {
+			data: Some(message.clone()),
+			trailers_sent: false,
+		}));
+		assert_eq!(response.headers()["content-type"], GRPC_WEB_CONTENT_TYPE);
+		assert!(response.headers().get("content-length").is_none());
+
+		let bytes = collect(response.into_body());
+		assert_eq!(&bytes[..message.len()], &message[..]);
+		let trailer = &bytes[message.len()..];
+		assert_eq!(trailer[0], GRPC_WEB_TRAILERS_FLAG);
+		let len = u32::from_be_bytes([trailer[1], trailer[2], trailer[3], trailer[4]]) as usize;
+		assert_eq!(&trailer[5..], b"grpc-status: 0\r\n");
+		assert_eq!(len, trailer.len() - 5);
+	}
+
+	#[test]
+	fn test_grpc_web_stream_error_becomes_trailer_frame() {
+		let (tx, rx) = tokio::sync::mpsc::channel(2);
+		tx.try_send(Ok(encode_grpc_frame(b"event"))).unwrap();
+		tx.try_send(Err(GrpcStatus::new(GRPC_STATUS_UNAVAILABLE, "shutting down"))).unwrap();
+		drop(tx);
+		let response = into_grpc_web_response(grpc_response(GrpcBody::Stream { rx, done: false }));
+		let bytes = collect(response.into_body());
+		let trailer = &bytes[encode_grpc_frame(b"event").len()..];
+		assert_eq!(trailer[0], GRPC_WEB_TRAILERS_FLAG);
+		assert_eq!(&trailer[5..], b"grpc-status: 14\r\ngrpc-message: shutting down\r\n");
+	}
+
+	#[test]
+	fn test_grpc_web_trailers_only_error_keeps_status_in_headers() {
+		let response = into_grpc_web_response(grpc_error_response(GrpcStatus::new(
+			GRPC_STATUS_UNAUTHENTICATED,
+			"Invalid credentials",
+		)));
+		assert_eq!(response.headers()["content-type"], GRPC_WEB_CONTENT_TYPE);
+		assert_eq!(response.headers()["grpc-status"], "16");
+		assert_eq!(response.headers()["content-length"], "0");
+		assert!(collect(response.into_body()).is_empty());
+	}
+
+	#[test]
+	fn test_grpc_protocol_from_content_type() {
+		let req = |ct: &str| {
+			http::Request::builder().method("POST").header("content-type", ct).body(()).unwrap()
+		};
+		assert_eq!(grpc_protocol(&req("application/grpc")), GrpcProtocol::Grpc);
+		assert_eq!(grpc_protocol(&req("application/grpc+proto")), GrpcProtocol::Grpc);
+		assert_eq!(grpc_protocol(&req("application/grpc-web")), GrpcProtocol::Web);
+		assert_eq!(grpc_protocol(&req("application/grpc-web+proto")), GrpcProtocol::Web);
+		assert_eq!(grpc_protocol(&req("application/grpc-web-text")), GrpcProtocol::WebText);
+	}
 
 	#[test]
 	fn test_encode_decode_roundtrip() {

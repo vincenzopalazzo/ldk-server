@@ -13,6 +13,20 @@ underlying LDK Node documentation.
 - **Service name:** `api.LightningNode`
 - **Full RPC path format:** `/api.LightningNode/<MethodName>`
 
+### gRPC-Web
+
+Browsers cannot read HTTP/2 trailers, so the same port also speaks
+[gRPC-Web](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md) in binary mode, over
+HTTP/1.1 or HTTP/2. Send `content-type: application/grpc-web+proto` (or `application/grpc-web`);
+the response uses the same content-type and carries its trailers as a final body frame (flag byte
+`0x80`). Authentication is identical: the `x-auth` HMAC covers the same framed request body.
+
+Responses allow any origin (`access-control-allow-origin: *`) and expose `grpc-status` and
+`grpc-message`, and CORS preflights are answered. Requests are authorized by their HMAC signature,
+not by cookies, so this grants nothing to a page without the API key. A browser must trust the
+server's certificate: use a CA-signed one or put a reverse proxy in front. Text mode
+(`application/grpc-web-text`) is not supported.
+
 ## Authentication
 
 Every gRPC request must include an `x-auth` metadata header with an HMAC-SHA256 signature:
