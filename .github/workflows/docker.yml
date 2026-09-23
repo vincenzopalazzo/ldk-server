@@ -11,6 +11,9 @@ on:
     paths:
       - "Dockerfile"
       - "Cargo.lock"
+      # The image stages build packages and copy binaries by the names these define.
+      - "Cargo.toml"
+      - "*/Cargo.toml"
       - ".github/workflows/docker.yml"
 
 permissions:
