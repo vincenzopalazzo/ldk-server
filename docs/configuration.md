@@ -176,7 +176,9 @@ See [Operations - TLS](operations.md#tls) for a recommended CA-signed flow.
 You must configure **exactly one** of the following sections:
 
 - **`[bitcoind]`** - Bitcoin Core RPC. **Recommended.** Most reliable and private option.
-  Required for production deployments. Optionally set `rest_address` to source
+  Required for production deployments. Authenticate with `rpc_user` and `rpc_password`, or
+  point `rpc_cookie_path` at Bitcoin Core's `.cookie` file instead; bitcoind writes a new cookie
+  on every start, so restart LDK Server after restarting bitcoind. Optionally set `rest_address` to source
   block/header/tx data from Bitcoin Core's REST interface instead of RPC; RPC is still used
   for calls REST doesn't support (e.g. transaction broadcast). `rest_address` is normally
   the same host:port as `rpc_address`.

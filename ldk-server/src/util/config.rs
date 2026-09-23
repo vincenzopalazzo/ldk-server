@@ -30,6 +30,7 @@ use crate::util::read_to_string_with_limit;
 
 const CONFIG_FILE_SIZE_LIMIT: usize = 1024 * 1024;
 const POSTGRES_CERTIFICATE_SIZE_LIMIT: usize = 1024 * 1024;
+const BITCOIND_COOKIE_SIZE_LIMIT: usize = 1024;
 const DEFAULT_GRPC_SERVICE_ADDRESS: &str = "127.0.0.1:3536";
 const DEFAULT_PATHFINDING_SCORES_SOURCE_URL: &str =
 	"https://rapidsync.lightningdevkit.org/scoring/scorer.bin";
@@ -158,6 +159,7 @@ struct ConfigBuilder {
 	bitcoind_rpc_address: Option<String>,
 	bitcoind_rpc_user: Option<String>,
 	bitcoind_rpc_password: Option<String>,
+	bitcoind_rpc_cookie_path: Option<String>,
 	bitcoind_rest_address: Option<String>,
 	rescan_from_height: Option<u32>,
 	force_wallet_full_scan: bool,
@@ -219,6 +221,8 @@ impl ConfigBuilder {
 			self.bitcoind_rpc_user = bitcoind.rpc_user.or(self.bitcoind_rpc_user.clone());
 			self.bitcoind_rpc_password =
 				bitcoind.rpc_password.or(self.bitcoind_rpc_password.clone());
+			self.bitcoind_rpc_cookie_path =
+				bitcoind.rpc_cookie_path.or(self.bitcoind_rpc_cookie_path.clone());
 			self.bitcoind_rest_address =
 				bitcoind.rest_address.or(self.bitcoind_rest_address.clone());
 		}
@@ -305,6 +309,10 @@ impl ConfigBuilder {
 
 		if let Some(bitcoind_rpc_password) = &args.bitcoind_rpc_password {
 			self.bitcoind_rpc_password = Some(bitcoind_rpc_password.clone());
+		}
+
+		if let Some(bitcoind_rpc_cookie_path) = &args.bitcoind_rpc_cookie_path {
+			self.bitcoind_rpc_cookie_path = Some(bitcoind_rpc_cookie_path.clone());
 		}
 
 		if let Some(bitcoind_rest_address) = &args.bitcoind_rest_address {
@@ -482,6 +490,7 @@ impl ConfigBuilder {
 		let rpc_configured = self.bitcoind_rpc_address.is_some()
 			|| self.bitcoind_rpc_user.is_some()
 			|| self.bitcoind_rpc_password.is_some()
+			|| self.bitcoind_rpc_cookie_path.is_some()
 			|| self.bitcoind_rest_address.is_some();
 		let electrum_configured = self.electrum_url.is_some();
 		let esplora_configured = self.esplora_url.is_some();
@@ -511,12 +520,26 @@ impl ConfigBuilder {
 				.ok_or_else(|| missing_field_err("bitcoind_rpc_address"))?;
 			let (rpc_host, rpc_port) = parse_host_port(&rpc_address)?;
 
-			let rpc_user =
-				self.bitcoind_rpc_user.ok_or_else(|| missing_field_err("bitcoind_rpc_user"))?;
-
-			let rpc_password = self
-				.bitcoind_rpc_password
-				.ok_or_else(|| missing_field_err("bitcoind_rpc_password"))?;
+			let (rpc_user, rpc_password) = match self.bitcoind_rpc_cookie_path {
+				Some(cookie_path) => {
+					if self.bitcoind_rpc_user.is_some() || self.bitcoind_rpc_password.is_some() {
+						return Err(io::Error::new(
+							io::ErrorKind::InvalidInput,
+							"Set either `bitcoind_rpc_user` and `bitcoind_rpc_password`, or `bitcoind_rpc_cookie_path`, not both.",
+						));
+					}
+					read_bitcoind_cookie(Path::new(&cookie_path))?
+				},
+				None => {
+					let rpc_user = self
+						.bitcoind_rpc_user
+						.ok_or_else(|| missing_field_err("bitcoind_rpc_user"))?;
+					let rpc_password = self
+						.bitcoind_rpc_password
+						.ok_or_else(|| missing_field_err("bitcoind_rpc_password"))?;
+					(rpc_user, rpc_password)
+				},
+			};
 
 			let (rest_host, rest_port) = self
 				.bitcoind_rest_address
@@ -810,6 +833,8 @@ struct BitcoindConfig {
 	rpc_address: Option<String>,
 	rpc_user: Option<String>,
 	rpc_password: Option<String>,
+	/// Path to Bitcoin Core's `.cookie` file, instead of `rpc_user` and `rpc_password`.
+	rpc_cookie_path: Option<String>,
 	/// When set, block/header/tx data is sourced from Bitcoin Core's REST interface instead of
 	/// RPC (RPC is still used for calls REST doesn't support, e.g. transaction broadcast).
 	/// This is normally the same host:port as `rpc_address`.
@@ -1243,6 +1268,13 @@ pub struct ArgsConfig {
 
 	#[arg(
 		long,
+		env = "LDK_SERVER_BITCOIND_RPC_COOKIE_PATH",
+		help = "Path to the underlying Bitcoin node's RPC cookie file, instead of an RPC user and password."
+	)]
+	bitcoind_rpc_cookie_path: Option<String>,
+
+	#[arg(
+		long,
 		env = "LDK_SERVER_BITCOIND_REST_ADDRESS",
 		help = "bitcoind REST address (host:port). Uses REST for chain data, RPC still handles the rest."
 	)]
@@ -1453,6 +1485,25 @@ pub fn load_config(args: &ArgsConfig) -> io::Result<Config> {
 	builder.build()
 }
 
+/// Read the RPC credentials from Bitcoin Core's `.cookie` file (`__cookie__:<password>`).
+///
+/// Bitcoin Core writes a fresh cookie on every start, so the credentials are only valid until
+/// bitcoind restarts; restart LDK Server after it.
+fn read_bitcoind_cookie(path: &Path) -> io::Result<(String, String)> {
+	let content = read_to_string_with_limit(path, BITCOIND_COOKIE_SIZE_LIMIT).map_err(|e| {
+		io::Error::new(e.kind(), format!("Failed to read bitcoind cookie file '{:?}': {}", path, e))
+	})?;
+	match content.trim_end_matches(['\r', '\n']).split_once(':') {
+		Some((user, password)) if !user.is_empty() && !password.is_empty() => {
+			Ok((user.to_string(), password.to_string()))
+		},
+		_ => Err(io::Error::new(
+			io::ErrorKind::InvalidData,
+			format!("'{:?}' is not a bitcoind cookie file: expected `<user>:<password>`.", path),
+		)),
+	}
+}
+
 fn missing_field_err(field: &str) -> io::Error {
 	io::Error::new(
 		io::ErrorKind::InvalidInput,
@@ -1561,6 +1612,7 @@ mod tests {
 			bitcoind_rpc_address: Some(String::from("127.0.1.9:18443")),
 			bitcoind_rpc_user: Some(String::from("bitcoind-testuser_cli")),
 			bitcoind_rpc_password: Some(String::from("bitcoind-testpassword_cli")),
+			bitcoind_rpc_cookie_path: None,
 			bitcoind_rest_address: None,
 			rescan_from_height: None,
 			force_wallet_full_scan: false,
@@ -1604,6 +1656,7 @@ mod tests {
 			bitcoind_rpc_address: None,
 			bitcoind_rpc_user: None,
 			bitcoind_rpc_password: None,
+			bitcoind_rpc_cookie_path: None,
 			bitcoind_rest_address: None,
 			rescan_from_height: None,
 			force_wallet_full_scan: false,
@@ -2591,6 +2644,71 @@ mod tests {
 		validate_missing!("rpc_user", missing_field_msg("bitcoind_rpc_user"));
 		validate_missing!("rpc_address", missing_field_msg("bitcoind_rpc_address"));
 		validate_missing!("network =", missing_field_msg("network"));
+	}
+
+	#[test]
+	fn test_bitcoind_rpc_cookie_path() {
+		let storage_path = std::env::temp_dir();
+		let config_file_name = "test_bitcoind_rpc_cookie_path.toml";
+		let cookie_path = storage_path.join("test_bitcoind_rpc_cookie_path.cookie");
+		fs::write(&cookie_path, "__cookie__:c00k1e-passw0rd\n").unwrap();
+
+		let mut args_config = empty_args_config();
+		args_config.config_file =
+			Some(storage_path.join(config_file_name).to_string_lossy().to_string());
+
+		// `[bitcoind]` last, so a line appended below lands in it.
+		let toml_config = format!(
+			r#"
+				[node]
+				network = "regtest"
+				{}
+				[bitcoind]
+				rpc_address = "127.0.0.1:18443"
+				rpc_cookie_path = "{}"
+			"#,
+			lsps2_service_config_for_feature(),
+			cookie_path.display()
+		);
+		fs::write(storage_path.join(config_file_name), &toml_config).unwrap();
+		let config = load_config(&args_config).unwrap();
+		match config.chain_source {
+			ChainSource::Rpc { rpc_user, rpc_password, .. } => {
+				assert_eq!(rpc_user, "__cookie__");
+				assert_eq!(rpc_password, "c00k1e-passw0rd");
+			},
+			other => panic!("expected the bitcoind RPC chain source, got {:?}", other),
+		}
+
+		// The cookie can also come from the command line or environment. (The config file only
+		// carries what the build requires regardless.)
+		let args_only_file = storage_path.join("test_bitcoind_rpc_cookie_path_args.toml");
+		fs::write(&args_only_file, lsps2_service_config_for_feature()).unwrap();
+		let mut args_only = empty_args_config();
+		args_only.config_file = Some(args_only_file.to_string_lossy().to_string());
+		args_only.node_network = Some(Network::Regtest);
+		args_only.bitcoind_rpc_address = Some(String::from("127.0.0.1:18443"));
+		args_only.bitcoind_rpc_cookie_path = Some(cookie_path.to_string_lossy().to_string());
+		assert!(matches!(
+			load_config(&args_only).unwrap().chain_source,
+			ChainSource::Rpc { ref rpc_user, .. } if rpc_user == "__cookie__"
+		));
+
+		// A cookie and a user/password pair are mutually exclusive.
+		let both = format!("{}rpc_user = \"someone\"\n", toml_config);
+		fs::write(storage_path.join(config_file_name), &both).unwrap();
+		let err = load_config(&args_config).unwrap_err();
+		assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+		assert!(err.to_string().contains("not both"), "{}", err);
+
+		// A malformed or missing cookie is a clear error.
+		fs::write(storage_path.join(config_file_name), &toml_config).unwrap();
+		fs::write(&cookie_path, "no-colon-here").unwrap();
+		let err = load_config(&args_config).unwrap_err();
+		assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+		fs::remove_file(&cookie_path).unwrap();
+		let err = load_config(&args_config).unwrap_err();
+		assert!(err.to_string().contains("Failed to read bitcoind cookie file"), "{}", err);
 	}
 
 	#[test]
