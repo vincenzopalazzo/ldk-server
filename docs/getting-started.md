@@ -152,6 +152,33 @@ Every command supports `--help` for detailed argument descriptions:
 ldk-server-cli open-channel --help
 ```
 
+## Docker
+
+The repository's `Dockerfile` builds two images:
+
+```bash
+docker build -t ldk-server .                                 # the server (default target)
+docker build --target ldk-server-mcp -t ldk-server-mcp .     # the MCP server
+```
+
+Release tags also publish them, for amd64 and arm64, as `ghcr.io/lightningdevkit/ldk-server` and
+`ghcr.io/lightningdevkit/ldk-server-mcp`.
+
+Run the server with its storage directory on a volume, since it holds the node's mnemonic and
+channel state, and give it time to shut down cleanly:
+
+```bash
+docker run -d --name ldk-server --stop-timeout 180 \
+  -v ldk-server-data:/root/.ldk-server \
+  -v "$PWD/config.toml:/config.toml:ro" \
+  -p 9735:9735 -p 3536:3536 \
+  ldk-server /config.toml
+```
+
+The image listens for gRPC on `0.0.0.0:3536`; add the host name clients use to `[tls] hosts`.
+`ldk-server-mcp` speaks MCP over stdio, so run it with `-i` and point it at the server with
+`LDK_BASE_URL`, `LDK_API_KEY` and `LDK_TLS_CERT_PATH`.
+
 ## Next Steps
 
 - [Configuration](configuration.md): all config options, environment variables, and Bitcoin backend tradeoffs
