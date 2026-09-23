@@ -417,7 +417,8 @@ fn load_tls_config(cert_path: &str, key_path: &str) -> Result<ServerConfig, Stri
 		.with_no_client_auth()
 		.with_single_cert(certs, key)
 		.map_err(|e| format!("Failed to build TLS server config: {e}"))?;
-	config.alpn_protocols = vec![b"h2".to_vec()];
+	// h2 for gRPC; http/1.1 for gRPC-Web from browsers and reverse proxies.
+	config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 	Ok(config)
 }
 

@@ -22,8 +22,8 @@ use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use clap::Parser;
 use hex::DisplayHex;
-use hyper::server::conn::http2;
 use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto;
 use ldk_node::bitcoin::Network;
 use ldk_node::config::{Config, ElectrumSyncConfig, EsploraSyncConfig};
 use ldk_node::lightning::events::{ClosureReason, PaymentFailureReason};
@@ -728,7 +728,9 @@ fn main() {
 								match acceptor.accept(stream).await {
 									Ok(tls_stream) => {
 										let io_stream = TokioIo::new(tls_stream);
-										if let Err(err) = http2::Builder::new(TokioExecutor::new()).serve_connection(io_stream, node_service).await {
+										// HTTP/2 for gRPC clients, and HTTP/1.1 too for gRPC-Web from browsers
+										// and reverse proxies.
+										if let Err(err) = auto::Builder::new(TokioExecutor::new()).serve_connection(io_stream, node_service).await {
 											error!("Failed to serve TLS connection: {err}");
 										}
 									},

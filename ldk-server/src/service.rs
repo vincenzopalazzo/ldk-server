@@ -37,10 +37,11 @@ use ldk_server_grpc::endpoints::{
 };
 use ldk_server_grpc::events::EventEnvelope;
 use ldk_server_grpc::grpc::{
-	decode_grpc_body, encode_grpc_frame, grpc_error_response, grpc_response, parse_grpc_timeout,
-	validate_grpc_request, GrpcBody, GrpcStatus, GRPC_STATUS_DEADLINE_EXCEEDED,
-	GRPC_STATUS_FAILED_PRECONDITION, GRPC_STATUS_INTERNAL, GRPC_STATUS_INVALID_ARGUMENT,
-	GRPC_STATUS_UNAUTHENTICATED, GRPC_STATUS_UNAVAILABLE, GRPC_STATUS_UNIMPLEMENTED,
+	decode_grpc_body, encode_grpc_frame, grpc_error_response, grpc_protocol, grpc_response,
+	into_grpc_web_response, parse_grpc_timeout, validate_grpc_request, GrpcBody, GrpcProtocol,
+	GrpcStatus, GRPC_STATUS_DEADLINE_EXCEEDED, GRPC_STATUS_FAILED_PRECONDITION,
+	GRPC_STATUS_INTERNAL, GRPC_STATUS_INVALID_ARGUMENT, GRPC_STATUS_UNAUTHENTICATED,
+	GRPC_STATUS_UNAVAILABLE, GRPC_STATUS_UNIMPLEMENTED,
 };
 use prost::Message;
 use tokio::sync::{broadcast, mpsc};
@@ -176,12 +177,80 @@ pub(crate) struct Context {
 	pub(crate) node: Arc<Node>,
 }
 
+type ServiceFuture = Pin<Box<dyn Future<Output = Result<Response<GrpcBody>, hyper::Error>> + Send>>;
+
+/// Request headers a gRPC-Web client sends, allowed by the CORS preflight.
+const GRPC_WEB_ALLOW_HEADERS: &str = "content-type, x-grpc-web, x-auth, x-user-agent, grpc-timeout";
+/// Response headers a gRPC-Web client must be able to read.
+const GRPC_WEB_EXPOSE_HEADERS: &str = "grpc-status, grpc-message";
+
+/// CORS for gRPC-Web. Any origin may call: requests are authorized by their HMAC signature,
+/// not by cookies or the origin, so a page without the API key gets nothing it can use.
+fn add_grpc_web_cors_headers(headers: &mut HeaderMap) {
+	headers.insert("access-control-allow-origin", hyper::header::HeaderValue::from_static("*"));
+	headers.insert(
+		"access-control-expose-headers",
+		hyper::header::HeaderValue::from_static(GRPC_WEB_EXPOSE_HEADERS),
+	);
+}
+
+/// Answer a browser's CORS preflight for an RPC.
+fn grpc_web_preflight_response() -> Response<GrpcBody> {
+	let mut response = Response::builder()
+		.status(204)
+		.header("access-control-allow-methods", "POST, OPTIONS")
+		.header("access-control-allow-headers", GRPC_WEB_ALLOW_HEADERS)
+		.header("access-control-max-age", "86400")
+		.body(GrpcBody::Plain { data: None })
+		.unwrap();
+	add_grpc_web_cors_headers(response.headers_mut());
+	response
+}
+
 impl Service<Request<Incoming>> for NodeService {
 	type Response = Response<GrpcBody>;
 	type Error = hyper::Error;
-	type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+	type Future = ServiceFuture;
 
-	fn call(&self, req: Request<Incoming>) -> Self::Future {
+	/// Serves native gRPC and gRPC-Web (for browsers) on the same port. A gRPC-Web request is
+	/// handled exactly like a gRPC one, including HMAC authentication over the same framed body,
+	/// and only the response framing differs.
+	fn call(&self, mut req: Request<Incoming>) -> Self::Future {
+		if req.method() == hyper::Method::OPTIONS
+			&& req.uri().path().starts_with(GRPC_SERVICE_PREFIX)
+		{
+			return Box::pin(async move { Ok(grpc_web_preflight_response()) });
+		}
+
+		match grpc_protocol(&req) {
+			GrpcProtocol::Grpc => self.call_grpc(req),
+			GrpcProtocol::WebText => Box::pin(async move {
+				let status = GrpcStatus::new(
+					GRPC_STATUS_UNIMPLEMENTED,
+					"gRPC-Web text mode is not supported; use application/grpc-web+proto",
+				);
+				let mut response = into_grpc_web_response(grpc_error_response(status));
+				add_grpc_web_cors_headers(response.headers_mut());
+				Ok(response)
+			}),
+			GrpcProtocol::Web => {
+				req.headers_mut().insert(
+					hyper::header::CONTENT_TYPE,
+					hyper::header::HeaderValue::from_static("application/grpc+proto"),
+				);
+				let response = self.call_grpc(req);
+				Box::pin(async move {
+					let mut response = into_grpc_web_response(response.await?);
+					add_grpc_web_cors_headers(response.headers_mut());
+					Ok(response)
+				})
+			},
+		}
+	}
+}
+
+impl NodeService {
+	fn call_grpc(&self, req: Request<Incoming>) -> ServiceFuture {
 		// Handle metrics endpoint (plain HTTP GET, not gRPC)
 		if req.method() == hyper::Method::GET
 			&& req.uri().path().len() > 1
@@ -265,7 +334,7 @@ impl Service<Request<Incoming>> for NodeService {
 		let event_sender = self.event_sender.clone();
 		let shutdown_rx = self.shutdown_rx.clone();
 		let (request_parts, request_body) = req.into_parts();
-		let future: Self::Future = Box::pin(async move {
+		let future: ServiceFuture = Box::pin(async move {
 			let content_length = match request_content_length(&request_parts.headers) {
 				Ok(content_length) => content_length,
 				Err(status) => return Ok(grpc_error_response(status)),
