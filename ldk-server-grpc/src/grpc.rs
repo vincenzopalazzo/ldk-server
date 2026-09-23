@@ -207,13 +207,15 @@ pub enum GrpcProtocol {
 	WebText,
 }
 
-/// Tell native gRPC and gRPC-Web requests apart by their content-type.
+/// Tell native gRPC and gRPC-Web requests apart by their content-type. Only the media type
+/// counts: parameters such as `; charset=utf-8` are ignored, and case does not matter.
 pub fn grpc_protocol<B>(req: &http::Request<B>) -> GrpcProtocol {
 	let content_type =
 		req.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("");
-	match content_type {
+	let media_type = content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+	match media_type.as_str() {
 		"application/grpc-web" | "application/grpc-web+proto" => GrpcProtocol::Web,
-		ct if ct.starts_with("application/grpc-web-text") => GrpcProtocol::WebText,
+		"application/grpc-web-text" | "application/grpc-web-text+proto" => GrpcProtocol::WebText,
 		_ => GrpcProtocol::Grpc,
 	}
 }
@@ -452,6 +454,16 @@ mod tests {
 		assert_eq!(grpc_protocol(&req("application/grpc-web")), GrpcProtocol::Web);
 		assert_eq!(grpc_protocol(&req("application/grpc-web+proto")), GrpcProtocol::Web);
 		assert_eq!(grpc_protocol(&req("application/grpc-web-text")), GrpcProtocol::WebText);
+		// Parameters and case do not change the media type.
+		assert_eq!(
+			grpc_protocol(&req("application/grpc-web+proto; charset=utf-8")),
+			GrpcProtocol::Web
+		);
+		assert_eq!(grpc_protocol(&req("Application/gRPC-Web")), GrpcProtocol::Web);
+		assert_eq!(
+			grpc_protocol(&req("application/grpc-web-text+proto; charset=utf-8")),
+			GrpcProtocol::WebText
+		);
 	}
 
 	#[test]
