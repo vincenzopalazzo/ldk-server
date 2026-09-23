@@ -26,28 +26,46 @@ RUN mkdir -p ldk-server/src ldk-server-cli/src ldk-server-client/src ldk-server-
 RUN if [ "$ENABLE_LSPS2" = "true" ]; then \
         cargo build --release --locked --features experimental-lsps2-support \
             -p ldk-server \
-            -p ldk-server-cli; \
+            -p ldk-server-cli \
+            -p ldk-server-mcp; \
     else \
         cargo build --release --locked \
             -p ldk-server \
-            -p ldk-server-cli; \
+            -p ldk-server-cli \
+            -p ldk-server-mcp; \
     fi
 
 # Copy real source and rebuild
 COPY . .
-RUN touch ldk-server/src/main.rs ldk-server-cli/src/main.rs \
+RUN touch ldk-server/src/main.rs ldk-server-cli/src/main.rs ldk-server-mcp/src/main.rs \
     ldk-server-client/src/lib.rs ldk-server-grpc/src/lib.rs \
     && if [ "$ENABLE_LSPS2" = "true" ]; then \
         cargo build --release --locked --features experimental-lsps2-support \
             -p ldk-server \
-            -p ldk-server-cli; \
+            -p ldk-server-cli \
+            -p ldk-server-mcp; \
     else \
         cargo build --release --locked \
             -p ldk-server \
-            -p ldk-server-cli; \
+            -p ldk-server-cli \
+            -p ldk-server-mcp; \
     fi
 
-FROM debian:bookworm-slim
+# The MCP server as its own image: `docker build --target ldk-server-mcp .`
+# It speaks MCP over stdio, so run it with `docker run -i` and point it at a node with
+# LDK_BASE_URL, LDK_API_KEY and LDK_TLS_CERT_PATH.
+FROM debian:bookworm-slim AS ldk-server-mcp
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/target/release/ldk-server-mcp /usr/local/bin/ldk-server-mcp
+
+ENTRYPOINT ["ldk-server-mcp"]
+
+# The server, the default target: `docker build .`
+FROM debian:bookworm-slim AS ldk-server
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
