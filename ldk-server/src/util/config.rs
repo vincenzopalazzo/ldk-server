@@ -580,7 +580,8 @@ impl ConfigBuilder {
 			self.log_max_size_mb.unwrap_or(DEFAULT_LOG_MAX_SIZE_MB) * 1024 * 1024;
 		let log_rotation_interval_secs =
 			self.log_rotation_interval_hours.unwrap_or(DEFAULT_LOG_ROTATION_INTERVAL_HOURS)
-				* 60 * 60;
+				* 60
+				* 60;
 		let log_max_files = self.log_max_files.unwrap_or(DEFAULT_LOG_MAX_FILES);
 		let log_to_file = self.log_to_file.unwrap_or(true);
 
@@ -1488,7 +1489,8 @@ fn parse_host_port(addr: &str) -> io::Result<(String, u16)> {
 
 #[cfg(test)]
 mod tests {
-	use std::{fs, str::FromStr};
+	use std::fs;
+	use std::str::FromStr;
 
 	use clap::Parser;
 	use ldk_node::bitcoin::secp256k1::PublicKey;
@@ -2320,7 +2322,7 @@ mod tests {
 			r#"
 			[node]
 			network = "regtest"
-			
+
 			[bitcoind]
 			rpc_address = "127.0.0.1:8332"
 			rpc_user = "bitcoind-testuser"
