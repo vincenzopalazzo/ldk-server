@@ -7,9 +7,9 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-use std::io;
 use std::path::Path;
 use std::str::FromStr;
+use std::{fs, io};
 
 use ldk_node::bip39::{Mnemonic, WordCount};
 use ldk_node::entropy::NodeEntropy;
@@ -18,10 +18,33 @@ use log::info;
 use crate::util::{create_dir_all_private, read_to_string_with_limit, write_new};
 
 const DEFAULT_MNEMONIC_FILE: &str = "keys_mnemonic";
+const DEFAULT_SEED_FILE: &str = "keys_seed";
 const MNEMONIC_FILE_SIZE_LIMIT: usize = 1024;
+const SEED_LEN: usize = 64;
 
 pub(crate) fn load_or_generate_node_entropy(storage_dir: &Path) -> io::Result<NodeEntropy> {
 	let mnemonic_path = storage_dir.join(DEFAULT_MNEMONIC_FILE);
+	let seed_path = storage_dir.join(DEFAULT_SEED_FILE);
+	let seed_exists = seed_path.try_exists()?;
+	let mnemonic_exists = mnemonic_path.try_exists()?;
+
+	// A node that already started on keys_mnemonic must not switch back to a leftover
+	// keys_seed. Those are different secrets, and the persisted channel state belongs
+	// to whichever one was used last.
+	if seed_exists && mnemonic_exists {
+		return Err(io::Error::new(
+			io::ErrorKind::InvalidData,
+			format!(
+				"Refusing to choose between {} and {}. Remove the unused secret before restarting.",
+				seed_path.display(),
+				mnemonic_path.display()
+			),
+		));
+	}
+
+	if seed_exists {
+		return load_node_entropy_from_seed(&seed_path);
+	}
 
 	let mnemonic = match read_to_string_with_limit(&mnemonic_path, MNEMONIC_FILE_SIZE_LIMIT) {
 		Ok(raw) => Mnemonic::from_str(raw.trim()).map_err(|e| {
@@ -31,6 +54,12 @@ pub(crate) fn load_or_generate_node_entropy(storage_dir: &Path) -> io::Result<No
 			)
 		})?,
 		Err(e) if e.kind() == io::ErrorKind::NotFound => {
+			// Re-check immediately before creating a mnemonic. A keys_seed that appears after
+			// the first check must not be ignored, or the next start would see both secrets
+			// and refuse to boot.
+			if seed_path.try_exists()? {
+				return load_node_entropy_from_seed(&seed_path);
+			}
 			if let Some(parent) = mnemonic_path.parent() {
 				create_dir_all_private(parent)?;
 			}
@@ -48,6 +77,34 @@ pub(crate) fn load_or_generate_node_entropy(storage_dir: &Path) -> io::Result<No
 	Ok(NodeEntropy::from_bip39_mnemonic(mnemonic, None))
 }
 
+fn load_node_entropy_from_seed(seed_path: &Path) -> io::Result<NodeEntropy> {
+	// Read the bytes ourselves. NodeEntropy::from_seed_path generates a new 64-byte
+	// seed when the path is missing, which would replace a vanished or unreadable file.
+	let seed = fs::read(seed_path).map_err(|e| {
+		io::Error::new(
+			e.kind(),
+			format!("Failed to read node entropy seed at {}: {e}", seed_path.display()),
+		)
+	})?;
+	if seed.len() != SEED_LEN {
+		return Err(io::Error::new(
+			io::ErrorKind::InvalidData,
+			format!(
+				"Node entropy seed at {} must be exactly {SEED_LEN} bytes, found {}",
+				seed_path.display(),
+				seed.len()
+			),
+		));
+	}
+	let mut bytes = [0u8; SEED_LEN];
+	bytes.copy_from_slice(&seed);
+	info!(
+		"Loaded node entropy from {}. Back up this file securely — it is required to recover on-chain funds.",
+		seed_path.display()
+	);
+	Ok(NodeEntropy::from_seed_bytes(bytes))
+}
+
 #[cfg(test)]
 mod tests {
 	use std::fs;
@@ -56,7 +113,6 @@ mod tests {
 
 	use super::*;
 
-	const STALE_SEED_FILE: &str = "keys_seed";
 	const KNOWN_MNEMONIC: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
 
 	fn tempdir(tag: &str) -> PathBuf {
@@ -106,15 +162,51 @@ mod tests {
 	}
 
 	#[test]
-	fn default_entropy_ignores_stale_keys_seed() {
-		let dir = tempdir("stale-seed");
-		let stale_seed_path = dir.join(STALE_SEED_FILE);
-		fs::write(&stale_seed_path, vec![0x42u8; 64]).unwrap();
+	fn loads_existing_keys_seed_without_creating_mnemonic() {
+		let dir = tempdir("existing-seed");
+		let seed_path = dir.join(DEFAULT_SEED_FILE);
+		let seed = [0x42u8; SEED_LEN];
+		fs::write(&seed_path, seed).unwrap();
 
 		load_or_generate_node_entropy(&dir).unwrap();
 
-		assert!(dir.join(DEFAULT_MNEMONIC_FILE).exists(), "keys_mnemonic was not created");
-		assert!(stale_seed_path.exists(), "stale keys_seed was removed");
+		assert!(!dir.join(DEFAULT_MNEMONIC_FILE).exists(), "keys_mnemonic was created");
+		assert_eq!(fs::read(&seed_path).unwrap(), seed, "keys_seed was rewritten");
+	}
+
+	#[test]
+	fn refuses_when_keys_seed_and_keys_mnemonic_both_exist() {
+		let dir = tempdir("both-secrets");
+		let seed_path = dir.join(DEFAULT_SEED_FILE);
+		let mnemonic_path = dir.join(DEFAULT_MNEMONIC_FILE);
+		let seed = vec![0x42u8; SEED_LEN];
+		fs::write(&seed_path, &seed).unwrap();
+		fs::write(&mnemonic_path, format!("{KNOWN_MNEMONIC}\n")).unwrap();
+
+		let err = load_or_generate_node_entropy(&dir).unwrap_err();
+
+		assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+		assert!(err.to_string().contains("Refusing to choose"));
+		assert_eq!(fs::read(&seed_path).unwrap(), seed, "keys_seed was rewritten");
+		assert_eq!(
+			fs::read_to_string(&mnemonic_path).unwrap().trim(),
+			KNOWN_MNEMONIC,
+			"keys_mnemonic was rewritten"
+		);
+	}
+
+	#[test]
+	fn rejects_invalid_keys_seed_without_creating_mnemonic() {
+		let dir = tempdir("invalid-seed");
+		let seed_path = dir.join(DEFAULT_SEED_FILE);
+		fs::write(&seed_path, vec![0x42u8; SEED_LEN - 1]).unwrap();
+
+		let err = load_or_generate_node_entropy(&dir).unwrap_err();
+
+		assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+		assert!(err.to_string().contains("must be exactly 64 bytes"));
+		assert!(!dir.join(DEFAULT_MNEMONIC_FILE).exists(), "keys_mnemonic was created");
+		assert!(seed_path.exists(), "invalid keys_seed was removed");
 	}
 
 	#[test]
